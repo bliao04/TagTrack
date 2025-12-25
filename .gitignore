@@ -1,0 +1,60 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Visual Studio / .NET
+**/bin/
+**/obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.nupkg
+project.lock.json
+packages/
+
+# ASP.NET / EF Core
+appsettings.Development.json
+secrets.json
+
+# Build output
+publish/
+*.Publish.xml
+
+# Logs
+*/logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Test and coverage
+TestResults/
+coverage*/
+*.lcov
+
+# JetBrains
+.idea/
+
+# VS Code
+.vscode/*
+!.vscode/extensions.json
+
+# Node / frontend
+node_modules/
+dist/
+dist-ssr/
+.vite/
+.turbo/
+.parcel-cache/
+
+# Env files
+.env
+.env.*
+
+# macOS
+._*
+
+# Other
+*.log
+.DS_Store
