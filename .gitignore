@@ -47,6 +47,7 @@ dist-ssr/
 .vite/
 .turbo/
 .parcel-cache/
+.vercel/
 
 # Env files
 .env
