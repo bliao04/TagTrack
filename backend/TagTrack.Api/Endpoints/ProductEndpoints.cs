@@ -83,6 +83,26 @@ public static class ProductEndpoints
 
         group.MapPost("", async ([FromBody] CreateProductRequest request, [FromServices] AppDbContext db) =>
         {
+            // Enforce unique URL and return existing if present
+            var existing = await db.Products
+                .Where(p => p.Url == request.Url)
+                .Select(p => new
+                {
+                    p.Id,
+                    p.Title,
+                    p.Url,
+                    p.Description,
+                    p.ImagePathInStorage,
+                    p.CreatedAt,
+                    p.UpdatedAt
+                })
+                .FirstOrDefaultAsync();
+
+            if (existing is not null)
+            {
+                return Results.Conflict(new { message = "Product with this URL already exists.", product = existing });
+            }
+
             var product = new Product
             {
                 Title = request.Title,
@@ -110,7 +130,19 @@ public static class ProductEndpoints
             };
             db.ProductSources.Add(source);
             await db.SaveChangesAsync();
-            return Results.Created($"/api/products/{id}/sources/{source.Id}", source);
+
+            // Project to DTO to avoid serialization cycles
+            var dto = new
+            {
+                source.Id,
+                source.ProductId,
+                source.Store,
+                source.ExternalId,
+                source.SourceUrl,
+                source.IsPrimary
+            };
+
+            return Results.Created($"/api/products/{id}/sources/{source.Id}", dto);
         });
 
         group.MapGet("/{id:guid}/prices", async (Guid id, [FromQuery] int? take, [FromServices] AppDbContext db) =>

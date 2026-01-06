@@ -55,6 +55,24 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 builder.Services.AddAuthorization();
 
+// CORS for frontend
+var allowedOrigins = (Environment.GetEnvironmentVariable("ALLOWED_ORIGINS")
+        ?? builder.Configuration["Cors:AllowedOrigins"]
+        ?? "http://localhost:5173")
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy
+            .WithOrigins(allowedOrigins)
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
+    });
+});
+
 // Domain services
 builder.Services.AddScoped<IPriceFetcher, AmazonMockFetcher>();
 builder.Services.AddScoped<PriceIngestionService>();
@@ -160,6 +178,7 @@ app.MapPost("/dev/seed", async (AppDbContext db) =>
 });
 
 app.UseHttpsRedirection();
+app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 

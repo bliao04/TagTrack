@@ -1,23 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
+import { addProductSource, createProduct, getPrices, seedDemo, triggerFetch, type PriceSnapshot } from '../lib/api'
 
-type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
-
-function safeParseJson(input: string):
-  | { ok: true; value: JsonValue }
-  | { ok: false; error: string } {
-  const trimmed = input.trim()
-  if (!trimmed) return { ok: false, error: 'Empty JSON' }
-  try {
-    return { ok: true, value: JSON.parse(trimmed) as JsonValue }
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error.message : 'Invalid JSON',
-    }
-  }
-}
+type Status = { kind: 'ok'; message: string } | { kind: 'error'; message: string } | null
 
 function joinUrl(baseUrl: string, path: string) {
   const base = baseUrl.trim().replace(/\/+$/, '')
@@ -29,33 +14,29 @@ function joinUrl(baseUrl: string, path: string) {
 
 export default function Home() {
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 
-  const [activeTab, setActiveTab] = useState<'supabase' | 'backend'>('supabase')
+  const [productId, setProductId] = useState('')
+  const [sourceId, setSourceId] = useState('')
+  const [prices, setPrices] = useState<PriceSnapshot[]>([])
+  const [latest, setLatest] = useState<PriceSnapshot | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [status, setStatus] = useState<Status>(null)
 
-  // --- Supabase test state
-  const [sbTable, setSbTable] = useState('')
-  const [sbSelect, setSbSelect] = useState('*')
-  const [sbLimit, setSbLimit] = useState(10)
-  const [sbEqColumn, setSbEqColumn] = useState('')
-  const [sbEqValue, setSbEqValue] = useState('')
-  const [sbInsertJson, setSbInsertJson] = useState('{\n  \n}')
-  const [sbLoading, setSbLoading] = useState(false)
-  const [sbResult, setSbResult] = useState<string>('')
-  const [sbError, setSbError] = useState<string>('')
+  const [createInput, setCreateInput] = useState({
+    title: 'Demo Product',
+    url: 'https://example.com/demo-product',
+    description: 'Demo product for testing fetch',
+  })
 
-  // --- Backend test state
-  const [bePath, setBePath] = useState('/openapi/v1.json')
-  const [beMethod, setBeMethod] = useState<'GET' | 'POST'>('GET')
-  const [beBodyJson, setBeBodyJson] = useState('{\n  \n}')
-  const [beLoading, setBeLoading] = useState(false)
-  const [beResult, setBeResult] = useState<string>('')
-  const [beError, setBeError] = useState<string>('')
+  const [sourceInput, setSourceInput] = useState({
+    store: 'amazon',
+    externalId: 'DEMO-ASIN-123',
+    sourceUrl: 'https://amazon.com/dp/DEMO-ASIN-123',
+    isPrimary: true,
+  })
 
   const envStatus = useMemo(() => {
     const missing: string[] = []
-    if (!import.meta.env.VITE_SUPABASE_URL) missing.push('VITE_SUPABASE_URL')
-    if (!import.meta.env.VITE_SUPABASE_ANON_KEY) missing.push('VITE_SUPABASE_ANON_KEY')
     if (!import.meta.env.VITE_API_BASE_URL) missing.push('VITE_API_BASE_URL')
     return {
       ok: missing.length === 0,
@@ -63,124 +44,86 @@ export default function Home() {
     }
   }, [])
 
-  async function runSupabaseSelect() {
-    setSbError('')
-    setSbResult('')
-    const table = sbTable.trim()
-    if (!table) {
-      setSbError('Enter a table name to query (e.g. products).')
-      return
-    }
-
-    setSbLoading(true)
+  async function handleCreateProduct() {
+    setStatus(null)
+    setLoading(true)
     try {
-      let query = supabase.from(table).select(sbSelect.trim() || '*')
-
-      const eqColumn = sbEqColumn.trim()
-      if (eqColumn) query = query.eq(eqColumn, sbEqValue)
-
-      const limit = Number.isFinite(sbLimit) ? Math.max(1, Math.min(1000, sbLimit)) : 10
-      query = query.limit(limit)
-
-      const { data, error } = await query
-      if (error) throw error
-
-      setSbResult(JSON.stringify({ table, select: sbSelect, limit, data }, null, 2))
+      const product = await createProduct(createInput)
+      setProductId(product.id)
+      setStatus({ kind: 'ok', message: `Product created: ${product.id}` })
     } catch (error) {
-      setSbError(error instanceof Error ? error.message : 'Supabase request failed')
+      setStatus({ kind: 'error', message: error instanceof Error ? error.message : 'Create failed' })
     } finally {
-      setSbLoading(false)
+      setLoading(false)
     }
   }
 
-  async function runSupabaseInsert() {
-    setSbError('')
-    setSbResult('')
-    const table = sbTable.trim()
-    if (!table) {
-      setSbError('Enter a table name to insert into (e.g. products).')
+  async function handleAddSource() {
+    setStatus(null)
+    if (!productId.trim()) {
+      setStatus({ kind: 'error', message: 'Set a product ID first.' })
       return
     }
-
-    const parsed = safeParseJson(sbInsertJson)
-    if (!parsed.ok) {
-      setSbError(`Insert JSON error: ${parsed.error}`)
-      return
-    }
-
-    if (parsed.value === null || typeof parsed.value !== 'object') {
-      setSbError('Insert JSON must be an object or an array of objects.')
-      return
-    }
-
-    setSbLoading(true)
+    setLoading(true)
     try {
-      const { data, error } = await supabase
-        .from(table)
-        // Supabase accepts object or array of objects
-        .insert(parsed.value as unknown)
-        .select()
-
-      if (error) throw error
-      setSbResult(JSON.stringify({ table, inserted: data }, null, 2))
+      const source = await addProductSource(productId.trim(), sourceInput)
+      setSourceId(source.id)
+      setStatus({ kind: 'ok', message: `Source added: ${source.id}` })
     } catch (error) {
-      setSbError(error instanceof Error ? error.message : 'Supabase insert failed')
+      setStatus({ kind: 'error', message: error instanceof Error ? error.message : 'Add source failed' })
     } finally {
-      setSbLoading(false)
+      setLoading(false)
     }
   }
 
-  async function runBackendRequest() {
-    setBeError('')
-    setBeResult('')
-    const url = joinUrl(apiBaseUrl ?? '', bePath)
-    if (!apiBaseUrl) {
-      setBeError('Missing VITE_API_BASE_URL (set it in a .env file for Vite).')
+  async function handleFetch() {
+    setStatus(null)
+    if (!productId.trim()) {
+      setStatus({ kind: 'error', message: 'Set a product ID first.' })
       return
     }
-
-    setBeLoading(true)
+    setLoading(true)
     try {
-      const init: RequestInit = {
-        method: beMethod,
-        headers: {
-          Accept: 'application/json, text/plain, */*',
-        },
-      }
-
-      if (beMethod === 'POST') {
-        const parsed = safeParseJson(beBodyJson)
-        if (!parsed.ok) {
-          setBeError(`Body JSON error: ${parsed.error}`)
-          return
-        }
-        init.headers = { ...init.headers, 'Content-Type': 'application/json' }
-        init.body = JSON.stringify(parsed.value)
-      }
-
-      const res = await fetch(url, init)
-      const contentType = res.headers.get('content-type') ?? ''
-      const raw = await res.text()
-      const maybeJson = contentType.includes('application/json')
-        ? safeParseJson(raw)
-        : null
-
-      const payload = {
-        url,
-        status: res.status,
-        ok: res.ok,
-        contentType,
-        body: maybeJson && maybeJson.ok ? maybeJson.value : raw,
-      }
-      setBeResult(JSON.stringify(payload, null, 2))
-
-      if (!res.ok) {
-        setBeError(`HTTP ${res.status} ${res.statusText}`)
-      }
+      const snapshot = await triggerFetch(productId.trim())
+      setLatest(snapshot)
+      setStatus({ kind: 'ok', message: `Fetched price: ${snapshot.price} ${snapshot.currency}` })
     } catch (error) {
-      setBeError(error instanceof Error ? error.message : 'Backend request failed')
+      setStatus({ kind: 'error', message: error instanceof Error ? error.message : 'Fetch failed' })
     } finally {
-      setBeLoading(false)
+      setLoading(false)
+    }
+  }
+
+  async function handleLoadPrices() {
+    setStatus(null)
+    if (!productId.trim()) {
+      setStatus({ kind: 'error', message: 'Set a product ID first.' })
+      return
+    }
+    setLoading(true)
+    try {
+      const list = await getPrices(productId.trim())
+      setPrices(list)
+      setStatus({ kind: 'ok', message: `Loaded ${list.length} prices` })
+    } catch (error) {
+      setStatus({ kind: 'error', message: error instanceof Error ? error.message : 'Load prices failed' })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleSeedDemo() {
+    setStatus(null)
+    setLoading(true)
+    try {
+      const res = await seedDemo()
+      setProductId(res.productId)
+      setSourceId(res.sourceId)
+      setStatus({ kind: 'ok', message: `Seeded product ${res.productId}` })
+    } catch (error) {
+      setStatus({ kind: 'error', message: error instanceof Error ? error.message : 'Seed failed' })
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -188,13 +131,10 @@ export default function Home() {
     <div style={{ textAlign: 'left', width: 'min(980px, 100%)' }}>
       <header style={{ display: 'flex', alignItems: 'baseline', gap: 16 }}>
         <h1 style={{ margin: 0 }}>TagTrack</h1>
-        <span style={{ opacity: 0.8 }}>Prototype integration panel</span>
+        <span style={{ opacity: 0.8 }}>Backend integration</span>
       </header>
 
       <div style={{ marginTop: 12, opacity: 0.85 }}>
-        <div>
-          Supabase: <span style={{ fontFamily: 'monospace' }}>{supabaseUrl || '(missing)'}</span>
-        </div>
         <div>
           API: <span style={{ fontFamily: 'monospace' }}>{apiBaseUrl || '(missing)'}</span>
         </div>
@@ -205,130 +145,139 @@ export default function Home() {
         )}
       </div>
 
-      <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-        <button type="button" onClick={() => setActiveTab('supabase')} disabled={activeTab === 'supabase'}>
-          Supabase
+      <div style={{ display: 'flex', gap: 8, marginTop: 16, alignItems: 'center' }}>
+        <button type="button" onClick={handleSeedDemo} disabled={loading}>
+          Seed demo product
         </button>
-        <button type="button" onClick={() => setActiveTab('backend')} disabled={activeTab === 'backend'}>
-          Backend
-        </button>
+        <span style={{ opacity: 0.8, fontFamily: 'monospace' }}>
+          Join: {joinUrl(apiBaseUrl ?? '', '/dev/seed')}
+        </span>
         <div style={{ flex: 1 }} />
         <Link to="/product/example" style={{ alignSelf: 'center' }}>
           Go to product page
         </Link>
       </div>
 
-      {activeTab === 'supabase' ? (
-        <section style={{ marginTop: 16 }}>
-          <h2 style={{ margin: '8px 0' }}>Supabase quick test</h2>
+      <section style={{ marginTop: 16, display: 'grid', gap: 16 }}>
+        <div style={{ display: 'grid', gap: 8 }}>
+          <h2 style={{ margin: '8px 0' }}>1) Create product</h2>
+          <label style={{ display: 'grid', gap: 6 }}>
+            <span>Title</span>
+            <input value={createInput.title} onChange={(e) => setCreateInput({ ...createInput, title: e.target.value })} />
+          </label>
+          <label style={{ display: 'grid', gap: 6 }}>
+            <span>URL</span>
+            <input value={createInput.url} onChange={(e) => setCreateInput({ ...createInput, url: e.target.value })} />
+          </label>
+          <label style={{ display: 'grid', gap: 6 }}>
+            <span>Description</span>
+            <textarea
+              value={createInput.description}
+              onChange={(e) => setCreateInput({ ...createInput, description: e.target.value })}
+              rows={3}
+            />
+          </label>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button type="button" onClick={handleCreateProduct} disabled={loading}>
+              {loading ? 'Working…' : 'Create product'}
+            </button>
+            {productId && <span style={{ fontFamily: 'monospace' }}>productId: {productId}</span>}
+          </div>
+        </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <label style={{ display: 'grid', gap: 6 }}>
-              <span>Table</span>
-              <input value={sbTable} onChange={(e) => setSbTable(e.target.value)} placeholder="e.g. products" />
-            </label>
+        <div style={{ display: 'grid', gap: 8 }}>
+          <h2 style={{ margin: '8px 0' }}>2) Add source</h2>
+          <label style={{ display: 'grid', gap: 6 }}>
+            <span>Product ID</span>
+            <input value={productId} onChange={(e) => setProductId(e.target.value)} placeholder="Set from step 1 or seed" />
+          </label>
+          <label style={{ display: 'grid', gap: 6 }}>
+            <span>Store</span>
+            <input value={sourceInput.store} onChange={(e) => setSourceInput({ ...sourceInput, store: e.target.value })} />
+          </label>
+          <label style={{ display: 'grid', gap: 6 }}>
+            <span>External ID</span>
+            <input
+              value={sourceInput.externalId}
+              onChange={(e) => setSourceInput({ ...sourceInput, externalId: e.target.value })}
+              placeholder="e.g. ASIN"
+            />
+          </label>
+          <label style={{ display: 'grid', gap: 6 }}>
+            <span>Source URL</span>
+            <input
+              value={sourceInput.sourceUrl}
+              onChange={(e) => setSourceInput({ ...sourceInput, sourceUrl: e.target.value })}
+              placeholder="product URL at store"
+            />
+          </label>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              type="checkbox"
+              checked={sourceInput.isPrimary}
+              onChange={(e) => setSourceInput({ ...sourceInput, isPrimary: e.target.checked })}
+            />
+            <span>Primary source</span>
+          </label>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button type="button" onClick={handleAddSource} disabled={loading}>
+              {loading ? 'Working…' : 'Add source'}
+            </button>
+            {sourceId && <span style={{ fontFamily: 'monospace' }}>sourceId: {sourceId}</span>}
+          </div>
+        </div>
 
-            <label style={{ display: 'grid', gap: 6 }}>
-              <span>Select</span>
-              <input value={sbSelect} onChange={(e) => setSbSelect(e.target.value)} placeholder="* or id,name" />
-            </label>
-
-            <label style={{ display: 'grid', gap: 6 }}>
-              <span>Limit (1-1000)</span>
-              <input
-                type="number"
-                value={sbLimit}
-                onChange={(e) => setSbLimit(Number(e.target.value))}
-                min={1}
-                max={1000}
-              />
-            </label>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <label style={{ display: 'grid', gap: 6 }}>
-                <span>EQ column (optional)</span>
-                <input value={sbEqColumn} onChange={(e) => setSbEqColumn(e.target.value)} placeholder="e.g. id" />
-              </label>
-              <label style={{ display: 'grid', gap: 6 }}>
-                <span>EQ value</span>
-                <input value={sbEqValue} onChange={(e) => setSbEqValue(e.target.value)} placeholder="e.g. 123" />
-              </label>
+        <div style={{ display: 'grid', gap: 8 }}>
+          <h2 style={{ margin: '8px 0' }}>3) Fetch price & history</h2>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button type="button" onClick={handleFetch} disabled={loading}>
+              {loading ? 'Working…' : 'Trigger fetch'}
+            </button>
+            <button type="button" onClick={handleLoadPrices} disabled={loading}>
+              {loading ? 'Working…' : 'Load prices'}
+            </button>
+            <Link to={`/product/${productId || 'example'}`} style={{ marginLeft: 'auto' }}>
+              View history page
+            </Link>
+          </div>
+          {latest && (
+            <div style={{ padding: 12, border: '1px solid #ddd', borderRadius: 8 }}>
+              <div style={{ fontWeight: 600 }}>Latest fetch</div>
+              <div style={{ fontFamily: 'monospace' }}>
+                {latest.price} {latest.currency} at {new Date(latest.collectedAt).toLocaleString()}
+              </div>
             </div>
-          </div>
-
-          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-            <button type="button" onClick={runSupabaseSelect} disabled={sbLoading}>
-              {sbLoading ? 'Working…' : 'Run select'}
-            </button>
-            <button type="button" onClick={runSupabaseInsert} disabled={sbLoading}>
-              {sbLoading ? 'Working…' : 'Insert JSON'}
-            </button>
-          </div>
-
-          <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
-            <label style={{ display: 'grid', gap: 6 }}>
-              <span>Insert payload (object or array)</span>
-              <textarea
-                value={sbInsertJson}
-                onChange={(e) => setSbInsertJson(e.target.value)}
-                rows={8}
-                style={{ width: '100%' }}
-              />
-            </label>
-          </div>
-
-          {sbError && (
-            <pre style={{ marginTop: 12, whiteSpace: 'pre-wrap' }}>Error: {sbError}</pre>
           )}
-          {sbResult && (
-            <pre style={{ marginTop: 12, whiteSpace: 'pre-wrap' }}>{sbResult}</pre>
+          {prices.length > 0 && (
+            <div style={{ display: 'grid', gap: 4 }}>
+              <div style={{ fontWeight: 600 }}>Recent prices</div>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                {prices.map((p) => (
+                  <li key={p.id} style={{ display: 'flex', gap: 8, fontFamily: 'monospace' }}>
+                    <span>{new Date(p.collectedAt).toLocaleString()}</span>
+                    <span>{p.price} {p.currency}</span>
+                    <span style={{ opacity: 0.7 }}>source {p.productSourceId}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
-        </section>
-      ) : (
-        <section style={{ marginTop: 16 }}>
-          <h2 style={{ margin: '8px 0' }}>Backend quick test</h2>
+        </div>
+      </section>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: 12 }}>
-            <label style={{ display: 'grid', gap: 6 }}>
-              <span>Method</span>
-              <select value={beMethod} onChange={(e) => setBeMethod(e.target.value as 'GET' | 'POST')}>
-                <option value="GET">GET</option>
-                <option value="POST">POST</option>
-              </select>
-            </label>
-
-            <label style={{ display: 'grid', gap: 6 }}>
-              <span>Path</span>
-              <input value={bePath} onChange={(e) => setBePath(e.target.value)} placeholder="/health or /api/..." />
-            </label>
-          </div>
-
-          {beMethod === 'POST' && (
-            <label style={{ display: 'grid', gap: 6, marginTop: 12 }}>
-              <span>JSON body</span>
-              <textarea
-                value={beBodyJson}
-                onChange={(e) => setBeBodyJson(e.target.value)}
-                rows={8}
-                style={{ width: '100%' }}
-              />
-            </label>
-          )}
-
-          <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center' }}>
-            <button type="button" onClick={runBackendRequest} disabled={beLoading}>
-              {beLoading ? 'Working…' : 'Send request'}
-            </button>
-            <span style={{ opacity: 0.8, fontFamily: 'monospace' }}>URL: {joinUrl(apiBaseUrl ?? '', bePath)}</span>
-          </div>
-
-          {beError && (
-            <pre style={{ marginTop: 12, whiteSpace: 'pre-wrap' }}>Error: {beError}</pre>
-          )}
-          {beResult && (
-            <pre style={{ marginTop: 12, whiteSpace: 'pre-wrap' }}>{beResult}</pre>
-          )}
-        </section>
+      {status && (
+        <div
+          style={{
+            marginTop: 16,
+            padding: 12,
+            borderRadius: 8,
+            border: '1px solid',
+            borderColor: status.kind === 'ok' ? '#2ecc71' : '#e74c3c',
+            background: status.kind === 'ok' ? '#eafaf1' : '#fdecea',
+          }}
+        >
+          {status.message}
+        </div>
       )}
     </div>
   )
