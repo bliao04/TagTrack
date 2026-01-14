@@ -55,7 +55,3 @@ dist-ssr/
 
 # macOS
 ._*
-
-# Other
-*.log
-.DS_Store

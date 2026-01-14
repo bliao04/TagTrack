@@ -74,7 +74,9 @@ builder.Services.AddCors(options =>
 });
 
 // Domain services
-builder.Services.AddScoped<IPriceFetcher, AmazonMockFetcher>();
+builder.Services.AddHttpClient("amazon-scraper");
+builder.Services.Configure<AmazonScraperOptions>(builder.Configuration.GetSection("Amazon"));
+builder.Services.AddScoped<IPriceFetcher, AmazonScraperFetcher>();
 builder.Services.AddScoped<PriceIngestionService>();
 
 // Build connection string by injecting password from environment (loaded from .env.local) into placeholder [DB_PASSWORD]

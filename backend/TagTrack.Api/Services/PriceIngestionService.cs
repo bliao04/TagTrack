@@ -57,4 +57,24 @@ public class PriceIngestionService
         await _db.SaveChangesAsync(cancellationToken);
         return snapshot;
     }
+
+    public async Task<(PriceFetchResult Result, Guid ProductId, Guid ProductSourceId)?> FetchLiveAsync(Guid productId, Guid? sourceId = null, CancellationToken cancellationToken = default)
+    {
+        var product = await _db.Products
+            .AsNoTracking()
+            .Include(p => p.Sources)
+            .FirstOrDefaultAsync(p => p.Id == productId, cancellationToken);
+
+        if (product is null) return null;
+
+        var source = sourceId.HasValue
+            ? product.Sources.FirstOrDefault(s => s.Id == sourceId.Value)
+            : product.Sources.FirstOrDefault(s => s.IsPrimary) ?? product.Sources.FirstOrDefault();
+
+        if (source is null) return null;
+
+        var fetched = await _fetcher.FetchAsync(product, source, cancellationToken);
+
+        return (fetched, product.Id, source.Id);
+    }
 }

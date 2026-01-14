@@ -165,9 +165,9 @@ public static class ProductEndpoints
             return Results.Ok(prices);
         });
 
-        group.MapPost("/{id:guid}/fetch", async (Guid id, [FromQuery] Guid? sourceId, [FromServices] PriceIngestionService ingestion) =>
+        group.MapPost("/{id:guid}/fetch", async (Guid id, [FromQuery] Guid? sourceId, [FromServices] PriceIngestionService ingestion, CancellationToken cancellationToken) =>
         {
-            var snapshot = await ingestion.FetchAndPersistAsync(id, sourceId);
+            var snapshot = await ingestion.FetchAndPersistAsync(id, sourceId, cancellationToken);
             if (snapshot is null) return Results.NotFound();
 
             return Results.Ok(new
@@ -179,6 +179,24 @@ public static class ProductEndpoints
                 snapshot.Currency,
                 snapshot.CollectedAt,
                 snapshot.RawDataJson
+            });
+        });
+
+        group.MapPost("/{id:guid}/fetch-live", async (Guid id, [FromQuery] Guid? sourceId, [FromServices] PriceIngestionService ingestion, CancellationToken cancellationToken) =>
+        {
+            var result = await ingestion.FetchLiveAsync(id, sourceId, cancellationToken);
+            if (result is null) return Results.NotFound();
+
+            return Results.Ok(new
+            {
+                result.Value.ProductId,
+                result.Value.ProductSourceId,
+                result.Value.Result.Price,
+                result.Value.Result.Currency,
+                result.Value.Result.CollectedAt,
+                result.Value.Result.RawDataJson,
+                result.Value.Result.Description,
+                ImagePathInStorage = result.Value.Result.ImageStoragePath
             });
         });
 
