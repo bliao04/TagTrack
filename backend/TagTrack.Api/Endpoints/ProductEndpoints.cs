@@ -15,6 +15,64 @@ public static class ProductEndpoints
         // Temporary: allow anonymous for local testing; add auth when wiring Supabase JWT
         var group = app.MapGroup("/api/products");
 
+        group.MapGet("/search", async (
+            [FromQuery] string q,
+            [FromQuery] int page,
+            [FromQuery] int pageSize,
+            [FromServices] AppDbContext db) =>
+        {
+            var query = (q ?? string.Empty).Trim();
+            var p = Math.Max(1, page);
+            var size = Math.Clamp(pageSize, 1, 50);
+
+            var baseQuery = db.Products.AsQueryable();
+            if (!string.IsNullOrWhiteSpace(query))
+            {
+                var lowered = query.ToLower();
+                baseQuery = baseQuery.Where(p =>
+                    EF.Functions.ILike(p.Title, $"%{query}%") ||
+                    EF.Functions.ILike(p.Url, $"%{query}%"));
+            }
+
+            var total = await baseQuery.CountAsync();
+
+            var items = await baseQuery
+                .OrderByDescending(p => p.UpdatedAt)
+                .Skip((p - 1) * size)
+                .Take(size)
+                .Select(p => new
+                {
+                    p.Id,
+                    p.Title,
+                    p.Url,
+                    p.Description,
+                    p.ImagePathInStorage,
+                    p.CreatedAt,
+                    p.UpdatedAt,
+                    LatestPrice = p.PriceSnapshots
+                        .OrderByDescending(ps => ps.CollectedAt)
+                        .Select(ps => new
+                        {
+                            ps.Price,
+                            ps.Currency,
+                            ps.CollectedAt,
+                            ps.ProductSourceId
+                        })
+                        .FirstOrDefault(),
+                    Sources = p.Sources.Select(s => new
+                    {
+                        s.Id,
+                        s.Store,
+                        s.ExternalId,
+                        s.SourceUrl,
+                        s.IsPrimary
+                    })
+                })
+                .ToListAsync();
+
+            return Results.Ok(new { total, page = p, pageSize = size, items });
+        });
+
         group.MapGet("", async ([FromServices] AppDbContext db) =>
         {
             var products = await db.Products
@@ -29,6 +87,16 @@ public static class ProductEndpoints
                     p.ImagePathInStorage,
                     p.CreatedAt,
                     p.UpdatedAt,
+                    LatestPrice = p.PriceSnapshots
+                        .OrderByDescending(ps => ps.CollectedAt)
+                        .Select(ps => new
+                        {
+                            ps.Price,
+                            ps.Currency,
+                            ps.CollectedAt,
+                            ps.ProductSourceId
+                        })
+                        .FirstOrDefault(),
                     Sources = p.Sources.Select(s => new
                     {
                         s.Id,

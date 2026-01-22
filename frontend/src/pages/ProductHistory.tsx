@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
-import { getPrices, type PriceSnapshot } from '../lib/api'
+import { Link, useParams } from 'react-router-dom'
+import NavBar from '../components/NavBar'
+import PriceChart from '../components/PriceChart'
+import { getPrices, getProduct, type PriceSnapshot, type ProductDetail } from '../lib/api'
 
 export default function ProductHistory() {
   const { id } = useParams()
+  const [product, setProduct] = useState<ProductDetail | null>(null)
   const [prices, setPrices] = useState<PriceSnapshot[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>('')
@@ -12,48 +15,89 @@ export default function ProductHistory() {
     if (!id) return
     setLoading(true)
     setError('')
-    getPrices(id)
-      .then(setPrices)
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load prices'))
+    Promise.all([getProduct(id), getPrices(id, 200)])
+      .then(([prod, priceList]) => {
+        setProduct(prod)
+        setPrices(priceList)
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load product'))
       .finally(() => setLoading(false))
   }, [id])
 
+  const latest = prices.at(0)
+
   return (
-    <div style={{ maxWidth: 960, margin: '0 auto', padding: 16 }}>
-      <h1 style={{ marginBottom: 4 }}>Product History</h1>
-      <p style={{ opacity: 0.8, fontFamily: 'monospace' }}>Product ID: {id}</p>
+    <div className="app-shell">
+      <NavBar />
+      <main className="page-width" style={{ padding: '32px 0', display: 'grid', gap: 20 }}>
+        {loading && <p>Loading…</p>}
+        {error && <p style={{ color: '#d33' }}>{error}</p>}
 
-      {loading && <p>Loading…</p>}
-      {error && <p style={{ color: '#d33' }}>{error}</p>}
+        {product && (
+          <section className="product-hero">
+            <div className="product-image" aria-label="Product image placeholder">
+              {product.imagePathInStorage ? (
+                <img src={product.imagePathInStorage} alt={product.title} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 12 }} />
+              ) : (
+                <div className="product-image-fallback">Image coming soon</div>
+              )}
+            </div>
+            <div className="product-meta">
+              <div className="pill">{product.sources?.length ?? 0} sources</div>
+              <h1 className="product-title">{product.title}</h1>
+              <div className="product-desc">{product.description || 'No description yet.'}</div>
+              <div className="product-latest">
+                <div>
+                  <div className="product-latest-label">Latest price</div>
+                  <div className="product-latest-value">
+                    {latest ? (
+                      <>
+                        {latest.price} {latest.currency}
+                        <span className="product-latest-date"> · {new Date(latest.collectedAt).toLocaleString()}</span>
+                      </>
+                    ) : (
+                      'Price pending'
+                    )}
+                  </div>
+                </div>
+                <Link to={product.url} target="_blank" rel="noreferrer" className="cta-button" style={{ textDecoration: 'none' }}>
+                  View source
+                </Link>
+              </div>
+              <div className="product-sources">
+                {(product.sources ?? []).map((s) => (
+                  <div key={s.id} className="product-source-card">
+                    <div className="product-source-title">{s.store}</div>
+                    <div className="product-source-meta">{s.externalId || s.sourceUrl || 'No id'}</div>
+                    {s.isPrimary && <span className="pill" style={{ background: '#dcfce7', color: '#166534' }}>Primary</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
 
-      {prices.length > 0 ? (
-        <div style={{ marginTop: 12 }}>
-          <h2 style={{ margin: '8px 0' }}>Recent prices</h2>
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 8 }}>
-            {prices.map((p) => (
-              <li
-                key={p.id}
-                style={{
-                  padding: 12,
-                  border: '1px solid #e0e0e0',
-                  borderRadius: 8,
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  gap: 12,
-                  alignItems: 'center',
-                  fontFamily: 'monospace',
-                }}
-              >
-                <span>{new Date(p.collectedAt).toLocaleString()}</span>
-                <span>{p.price} {p.currency}</span>
-                <span style={{ opacity: 0.7 }}>source {p.productSourceId}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : (
-        !loading && <p style={{ opacity: 0.8 }}>No prices yet. Trigger a fetch from the home page.</p>
-      )}
+        <section className="product-chart">
+          <PriceChart prices={prices} />
+        </section>
+
+        <section>
+          <h3 className="section-title">Price history</h3>
+          {prices.length > 0 ? (
+            <ul className="price-list">
+              {prices.map((p) => (
+                <li key={p.id} className="price-row">
+                  <span>{new Date(p.collectedAt).toLocaleString()}</span>
+                  <span>{p.price} {p.currency}</span>
+                  <span className="price-source">source {p.productSourceId}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            !loading && <p style={{ color: '#64748b' }}>No prices yet. Trigger a fetch from the home page.</p>
+          )}
+        </section>
+      </main>
     </div>
   )
 }

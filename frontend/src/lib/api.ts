@@ -41,6 +41,16 @@ export type Product = {
   createdAt: string
   updatedAt: string
   sources?: ProductSource[]
+  latestPrice?: {
+    price: number
+    currency: string
+    collectedAt: string
+    productSourceId: string
+  } | null
+}
+
+export type ProductDetail = Product & {
+  prices?: PriceSnapshot[]
 }
 
 export type PriceSnapshot = {
@@ -50,6 +60,19 @@ export type PriceSnapshot = {
   currency: string
   collectedAt: string
   rawDataJson: string | null
+}
+
+export async function listProducts(): Promise<Product[]> {
+  return request<Product[]>('/api/products')
+}
+
+export async function searchProducts(query: string, page = 1, pageSize = 20): Promise<{ total: number; page: number; pageSize: number; items: Product[] }> {
+  const params = new URLSearchParams({ q: query, page: String(page), pageSize: String(pageSize) })
+  return request(`/api/products/search?${params.toString()}`)
+}
+
+export async function getProduct(id: string): Promise<ProductDetail> {
+  return request<ProductDetail>(`/api/products/${id}`)
 }
 
 export async function createProduct(input: { title: string; url: string; description?: string | null }): Promise<Product> {

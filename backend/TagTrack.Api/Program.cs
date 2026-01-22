@@ -78,6 +78,8 @@ builder.Services.AddHttpClient("amazon-scraper");
 builder.Services.Configure<AmazonScraperOptions>(builder.Configuration.GetSection("Amazon"));
 builder.Services.AddScoped<IPriceFetcher, AmazonScraperFetcher>();
 builder.Services.AddScoped<PriceIngestionService>();
+builder.Services.Configure<PriceRefreshOptions>(builder.Configuration.GetSection("PriceRefresh"));
+builder.Services.AddHostedService<PriceRefreshService>();
 
 // Build connection string by injecting password from environment (loaded from .env.local) into placeholder [DB_PASSWORD]
 var rawConn = builder.Configuration.GetConnectionString("Default") ?? string.Empty;
@@ -177,6 +179,68 @@ app.MapPost("/dev/seed", async (AppDbContext db) =>
             }
         }
     });
+});
+
+// Seed multiple sample Amazon products for front-end browsing (idempotent)
+app.MapPost("/dev/seed-sample-products", async (AppDbContext db) =>
+{
+    var samples = new[]
+    {
+        new { Title = "Apple AirPods Pro (2nd Gen)", Url = "https://www.amazon.com/dp/B0CHX1V2W9", ExternalId = "B0CHX1V2W9" },
+        new { Title = "Kindle Paperwhite 16 GB", Url = "https://www.amazon.com/dp/B09SWW583J", ExternalId = "B09SWW583J" },
+        new { Title = "Instant Pot Duo 7-in-1", Url = "https://www.amazon.com/dp/B08PQ2KWHS", ExternalId = "B08PQ2KWHS" }
+    };
+
+    var created = new List<object>();
+
+    foreach (var s in samples)
+    {
+        var product = await db.Products.FirstOrDefaultAsync(p => p.Url == s.Url);
+        if (product is null)
+        {
+            product = new Product
+            { Title = s.Title, Url = s.Url, Description = null, ImagePathInStorage = null };
+            db.Products.Add(product);
+            await db.SaveChangesAsync();
+        }
+
+        var source = await db.ProductSources.FirstOrDefaultAsync(ps => ps.ProductId == product.Id && ps.Store == "amazon");
+        if (source is null)
+        {
+            source = new ProductSource
+            {
+                ProductId = product.Id,
+                Store = "amazon",
+                ExternalId = s.ExternalId,
+                SourceUrl = s.Url,
+                IsPrimary = true
+            };
+            db.ProductSources.Add(source);
+            await db.SaveChangesAsync();
+        }
+
+        created.Add(new
+        {
+            product.Id,
+            product.Title,
+            product.Url,
+            product.Description,
+            product.ImagePathInStorage,
+            product.CreatedAt,
+            product.UpdatedAt,
+            source = new
+            {
+                source.Id,
+                source.ProductId,
+                source.Store,
+                source.ExternalId,
+                source.SourceUrl,
+                source.IsPrimary
+            }
+        });
+    }
+
+    return Results.Ok(new { count = created.Count, items = created });
 });
 
 app.UseHttpsRedirection();
